@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import time
+import matplotlib.pyplot as plt
 
 pcDir="/media/furqan/Data/Projects/PointCloud/Dataset"
 serverDir="/root/dataset/kitti"
@@ -27,15 +28,33 @@ serverDir="/root/dataset/kitti"
 # test_dataloader = DataLoader(test_dataset, batch_size=cfg.batch_size * cfg.num_gpus, shuffle=False,
 #                              num_workers=cfg.num_workers, pin_memory=True, drop_last=True)
 # dt = np.dtype(['x','y','z','i'])
+def plot2d(twod_array,title,cmap):
+    plt.figure(figsize=(15, 2))
+    plt.title(title)
+    plt.imshow(twod_array, cmap=cmap)
+    plt.show()
 
 dataset = kitti_loader()
 # scan,_ =dataset.__getitem__(index=1)
-dataloader = DataLoader(dataset,batch_size=1, shuffle= True, num_workers= 4,
-                        pin_memory= True, drop_last=True)
+print("The length of dataset is = ", len(dataset))
+# proj_remission, proj_sem_label, proj_xyz, proj_range, proj_idx, proj_mask = dataset[2250]
+# plot2d(proj_remission, "proj_remission", "tab20c")
+# plot2d(proj_sem_label,"proj_sem_label", "tab20c")
+#
+# # Masking cars only in 2D
+# proj_label = np.zeros((64, 1024), dtype=np.float32)
+# proj_label[proj_sem_label == 10] = 1
+# print(proj_label[18, 0:200])
+#
+# plot2d(proj_label,"proj_label","Greys")
 
+
+dataloader = DataLoader(dataset, batch_size=8, shuffle=True, num_workers=4,
+                        pin_memory=True, drop_last=True)
+#
 model= U_Net()
 print("Model has {} paramerters in total".format(sum(x.numel() for x in model.parameters())))
-
+#
 if torch.cuda.device_count() > 1:
     model = nn.DataParallel(model)
 model.cuda()
@@ -48,25 +67,14 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', fa
                                                        eps=1e-08)
 def train():
     for batch_idx, (proj_remission, proj_sem_label) in enumerate(dataloader):
-        print(proj_remission.shape(),"    ",proj_sem_label.shape())
-        # # convert it into x,y,z coordinates and i
-        # x = scan[0,:, 0]  # get x
-        # y = scan[0,:, 1]  # get x
-        # z = scan[0,:, 2]  # get x
-        # i = scan[0,:, 3]  # get intensity
-        # label= labels[0,:]
-        # for ii in range(len(label)):
-        #     if label[ii] == "10":
-        #         label[ii] = 1
-        #     else:
-        #         label[ii] = 0
-        # img,lab = projection_points(x, y, z, i, label)
-    # optimizer.zero_grad()
-    # out=model(img)
-    # loss=loss_crs(out,lab)
-    #
-    # loss.backward()
-    # optimizer.step()
+
+        print(proj_remission.shape)
+        print("Batch == ", batch_idx)
+        optimizer.zero_grad()
+        out = model(proj_remission)
+        loss = loss_crs(out, proj_sem_label)
+        loss.backward()
+        optimizer.step()
 
 
 def main():

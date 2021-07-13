@@ -1,17 +1,22 @@
-
 import os
 import numpy as np
+import matplotlib.pyplot as plt
 from torch.utils.data import Dataset
 
 
 class kitti_loader(Dataset):
     def __init__(self, data_dir='/root/dataset/kitti/sequences/',
-                 train=True, skip_frames=200, npoints=100000):
+                 train=True, skip_frames=0, npoints=100000):
         self.train = train
         self.data_dir = data_dir
         self.train = train
         self.skip_frames = skip_frames
         self.maxPoints = npoints
+
+        self.proj_H=64
+        self.proj_W=1024
+        self.fov_up=3
+        self.fov_down=-25
 
         self.reset()
         self.load_filenames()
@@ -43,7 +48,7 @@ class kitti_loader(Dataset):
         # projection color with semantic labels
         self.proj_sem_label = np.zeros((self.proj_H, self.proj_W), dtype=np.int32)
 
-def load_filenames(self):
+    def load_filenames(self):
         if self.train:
             # seq = ['00', '01', '02', '03', '04', '05', '06', '07', '09', '10']
             seq = ['00']
@@ -56,7 +61,7 @@ def load_filenames(self):
                 file_lb = os.listdir(folder_lb)
                 file_lb.sort(key=lambda x: str(x[:-4]))
 
-                for index in range(0, len(file_pc), self.skip_frames):
+                for index in range(0, len(file_pc), self.skip_frames+1):
                     self.pointcloud_path.append('%s/%s' % (folder_pc, file_pc[index]))
                     self.label_path.append('%s/%s' % (folder_lb, file_lb[index]))
         else:
@@ -67,7 +72,7 @@ def load_filenames(self):
             file_pc.sort(key=lambda x: str(x[:-4]))
             file_lb = os.listdir(folder_lb)
             file_lb.sort(key=lambda x: str(x[:-4]))
-            for index in range(0, len(file_pc), self.skip_frames):
+            for index in range(0, len(file_pc), self.skip_frames+1):
                 self.pointcloud_path.append('%s/%s' % (folder_pc, file_pc[index]))
                 self.label_path.append('%s/%s' % (folder_lb, file_lb[index]))
 
@@ -76,7 +81,14 @@ def load_filenames(self):
         data = np.fromfile(pointcloud_path, dtype=np.float32).reshape(-1, 4)
         self.point = data[:, 0:3]
         self.remission = data[:, 3]
-        self.label = np.fromfile(label_path, dtype=np.float32)
+        label = np.fromfile(label_path, dtype=np.int32).reshape((-1))
+
+        # if not isinstance(label, np.ndarray):
+        #     raise TypeError("Label should be numpy array")
+        sem_label = label & 0xFFFF  # semantic label in lower half
+        inst_label = label >> 16  # instance id in upper half
+
+        self.label = sem_label
 
     def limitDataset(self, xlim, ylim, zlim):
         # square
@@ -93,10 +105,10 @@ def load_filenames(self):
         self.point = self.point[choice]
         self.label = self.label[choice]
 
-    def do_range_projection(self,fov_up,fov_down,proj_W,proj_H):
+    def do_range_projection(self):
         # laser parameters
-        fov_up = fov_up / 180.0 * np.pi  # field of view up in rad
-        fov_down = fov_down / 180.0 * np.pi  # field of view down in rad
+        fov_up = self.fov_up / 180.0 * np.pi  # field of view up in rad
+        fov_down = self.fov_down / 180.0 * np.pi  # field of view down in rad
         fov = abs(fov_down) + abs(fov_up)  # get field of view total in rad
 
         # get depth of all points
@@ -116,17 +128,17 @@ def load_filenames(self):
         proj_y = 1.0 - (pitch + abs(fov_down)) / fov  # in [0.0, 1.0]
 
         # scale to image size using angular resolution
-        proj_x *= proj_W  # in [0.0, W]
-        proj_y *= proj_H  # in [0.0, H]
+        proj_x *= self.proj_W  # in [0.0, W]
+        proj_y *= self.proj_H  # in [0.0, H]
 
         # round and clamp for use as index
         proj_x = np.floor(proj_x)
-        proj_x = np.minimum(proj_W - 1, proj_x)
+        proj_x = np.minimum(self.proj_W - 1, proj_x)
         proj_x = np.maximum(0, proj_x).astype(np.int32)  # in [0,W-1]
         self.proj_x = np.copy(proj_x)  # store a copy in orig order
 
         proj_y = np.floor(proj_y)
-        proj_y = np.minimum(proj_H - 1, proj_y)
+        proj_y = np.minimum(self.proj_H - 1, proj_y)
         proj_y = np.maximum(0, proj_y).astype(np.int32)  # in [0,H-1]
         self.proj_y = np.copy(proj_y)  # stope a copy in original order
 
@@ -138,8 +150,8 @@ def load_filenames(self):
         order = np.argsort(depth)[::-1]
         depth = depth[order]
         indices = indices[order]
-        points = self.points[order]
-        remission = self.remissions[order]
+        points = self.point[order]
+        remission = self.remission[order]
         proj_y = proj_y[order]
         proj_x = proj_x[order]
 
@@ -156,11 +168,15 @@ def load_filenames(self):
         # semantics
         self.proj_sem_label[mask] = self.label[self.proj_idx[mask]]
 
-
+    def __len__(self):
+        return len(self.pointcloud_path)
 
     def __getitem__(self, index):
         self.get_data(self.pointcloud_path[index], self.label_path[index])
         self.limitDataset([-51.2, 51.2], [-51.2, 51.2], [-5, 3])
-        self.do_range_projection(self,3,-25,1024,64)
+        self.do_range_projection()
 
-        return self.proj_remission, self.proj_sem_label
+        rem = np.expand_dims(self.proj_remission, axis=0)
+        lab = np.expand_dims(self.proj_sem_label, axis=0)
+        return rem, lab
+        # return self.proj_remission,self.proj_sem_label,self.proj_xyz, self.proj_range, self.proj_idx, self.proj_mask
