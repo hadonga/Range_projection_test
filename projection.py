@@ -12,9 +12,6 @@ import torch.nn as nn
 import time
 import matplotlib.pyplot as plt
 
-pcDir="/media/furqan/Data/Projects/PointCloud/Dataset"
-serverDir="/root/dataset/kitti"
-
 
 
 # dataset = kitti_loader(data_dir=cfg.root_dir, point_cloud_files=cfg.point_cloud_files,
@@ -36,8 +33,12 @@ def plot2d(twod_array,title,cmap):
 
 dataset = kitti_loader()
 # scan,_ =dataset.__getitem__(index=1)
-print("The length of dataset is = ", len(dataset))
-# proj_remission, proj_sem_label, proj_xyz, proj_range, proj_idx, proj_mask = dataset[2250]
+# print("The length of dataset is = ", len(dataset))
+# proj_remission, proj_sem_label = dataset[2250]
+#
+# print("1.....", np.shape(proj_remission))
+# print("2.....", np.shape(proj_sem_label))
+
 # plot2d(proj_remission, "proj_remission", "tab20c")
 # plot2d(proj_sem_label,"proj_sem_label", "tab20c")
 #
@@ -49,7 +50,7 @@ print("The length of dataset is = ", len(dataset))
 # plot2d(proj_label,"proj_label","Greys")
 
 
-dataloader = DataLoader(dataset, batch_size=8, shuffle=True, num_workers=4,
+dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=4,
                         pin_memory=True, drop_last=True)
 #
 model= U_Net()
@@ -65,11 +66,19 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.1, weight_decay=0.9)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.35, patience=5, verbose=True,
                                                        threshold=0.0001, threshold_mode='rel', cooldown=0, min_lr=0,
                                                        eps=1e-08)
+
+print(model)
+
 def train():
     for batch_idx, (proj_remission, proj_sem_label) in enumerate(dataloader):
 
         print(proj_remission.shape)
         print("Batch == ", batch_idx)
+        # proj_remission, proj_sem_label = proj_remission.cuda(), proj_sem_label.cuda()
+        proj_remission = proj_remission.cuda()
+
+        # proj_sem_label = torch.tensor(proj_sem_label, dtype=torch.long, device=torch.device('cuda'))
+        proj_sem_label = proj_sem_label.cuda(non_blocking=True).long()
         optimizer.zero_grad()
         out = model(proj_remission)
         loss = loss_crs(out, proj_sem_label)

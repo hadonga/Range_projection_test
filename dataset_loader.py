@@ -1,11 +1,14 @@
 import os
 import numpy as np
+import torch
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset
 
+pcDir = "/media/furqan/Data/Projects/PointCloud/Dataset/sequences/"
+serverDir = "/root/dataset/kitti/sequences/"
 
 class kitti_loader(Dataset):
-    def __init__(self, data_dir='/root/dataset/kitti/sequences/',
+    def __init__(self, data_dir=serverDir,
                  train=True, skip_frames=0, npoints=100000):
         self.train = train
         self.data_dir = data_dir
@@ -13,10 +16,10 @@ class kitti_loader(Dataset):
         self.skip_frames = skip_frames
         self.maxPoints = npoints
 
-        self.proj_H=64
-        self.proj_W=1024
-        self.fov_up=3
-        self.fov_down=-25
+        self.proj_H = 64
+        self.proj_W = 1024
+        self.fov_up = 3
+        self.fov_down = -25
 
         self.reset()
         self.load_filenames()
@@ -47,6 +50,9 @@ class kitti_loader(Dataset):
 
         # projection color with semantic labels
         self.proj_sem_label = np.zeros((self.proj_H, self.proj_W), dtype=np.int32)
+
+        #concatenate the mask
+        self.masked_label=[]
 
     def load_filenames(self):
         if self.train:
@@ -168,6 +174,15 @@ class kitti_loader(Dataset):
         # semantics
         self.proj_sem_label[mask] = self.label[self.proj_idx[mask]]
 
+    def car_only_masking(self):
+        lab = self.proj_sem_label * self.proj_mask
+        proj_label_car = np.zeros((64, 1024), dtype=np.float32)
+        proj_label_car[lab == 10] = 1
+        # proj_label_env = np.full((64, 1024), 1, dtype=np.float32)
+        # proj_label_env[lab == 10] = 0
+        # self.masked_label = np.stack((proj_label_car, proj_label_env), axis=0)
+        self.masked_label = proj_label_car
+
     def __len__(self):
         return len(self.pointcloud_path)
 
@@ -177,6 +192,10 @@ class kitti_loader(Dataset):
         self.do_range_projection()
 
         rem = np.expand_dims(self.proj_remission, axis=0)
-        lab = np.expand_dims(self.proj_sem_label, axis=0)
-        return rem, lab
+        self.car_only_masking()
+        # lab = np.expand_dims(self.proj_sem_label, axis=0)
+        # proj_mask = torch.from_numpy(self.proj_mask)
+        # self.proj_sem_label = torch.from_numpy(self.proj_sem_label).clone()
+        # lab = self.proj_sem_label * proj_mask
+        return rem, self.masked_label
         # return self.proj_remission,self.proj_sem_label,self.proj_xyz, self.proj_range, self.proj_idx, self.proj_mask
