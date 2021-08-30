@@ -3,9 +3,11 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset
+import math
 
-pcDir = "/media/furqan/Data/Projects/PointCloud/Dataset/sequences/"
-serverDir = "/root/dataset/kitti/sequences/"
+# pcDir = "D:/Projects/pointcloud/ourCodes/comparison/sequences/sequences/"
+# serverDir = "/root/dataset/kitti/sequences/" old server
+serverDir = "/home/dong/dataset/sequences/" #new server
 
 class kitti_loader(Dataset):
     def __init__(self, data_dir=serverDir,
@@ -56,8 +58,8 @@ class kitti_loader(Dataset):
 
     def load_filenames(self):
         if self.train:
-            # seq = ['00', '01', '02', '03', '04', '05', '06', '07', '09', '10']
-            seq = ['00']
+            seq = ['00', '01', '02', '03', '04', '05', '06', '07', '09', '10']
+            # seq = ['08']
             for seq_num in seq:
                 folder_pc = os.path.join(self.data_dir, seq_num, 'velodyne')
                 folder_lb = os.path.join(self.data_dir, seq_num, 'labels')
@@ -110,6 +112,18 @@ class kitti_loader(Dataset):
             choice = np.random.choice(len(self.point), self.maxPoints, replace=True)
         self.point = self.point[choice]
         self.label = self.label[choice]
+
+    def limitDataset_circular(self, xylim, zlim):
+        self.point = np.array(
+            [x for x in self.point if math.sqrt(x[0] ** 2 + x[1] ** 2) < xylim and 0 < x[2] - zlim[0] < zlim[1] - zlim[0]])
+
+        if len(self.point) >= self.maxPoints:
+            choice = np.random.choice(len(self.point), self.maxPoints, replace=False)
+        else:
+            choice = np.random.choice(len(self.point), self.maxPoints, replace=True)
+        self.point = self.point[choice]
+        self.label = self.label[choice]
+
 
     def do_range_projection(self):
         # laser parameters
@@ -176,23 +190,39 @@ class kitti_loader(Dataset):
 
     def car_only_masking(self):
         lab = self.proj_sem_label * self.proj_mask
-        proj_label_car = np.zeros((64, 1024), dtype=np.float32)
+        proj_label_car = np.zeros((self.proj_H, self.proj_W), dtype=np.float32)
         proj_label_car[lab == 10] = 1
-        # proj_label_env = np.full((64, 1024), 1, dtype=np.float32)
-        # proj_label_env[lab == 10] = 0
-        # self.masked_label = np.stack((proj_label_car, proj_label_env), axis=0)
+        proj_label_env = np.full((self.proj_H, self.proj_W), 1, dtype=np.float32)
+        proj_label_env[lab == 10] = 0
+        self.masked_label = np.stack((proj_label_car, proj_label_env), axis=0)
         self.masked_label = proj_label_car
+
+    def ground_only_masking(self):
+        lab = self.proj_sem_label * self.proj_mask
+        proj_label_ground = np.zeros((self.proj_H, self.proj_W), dtype=np.float32)
+        proj_label_ground[lab == 40] = 1
+        proj_label_ground[lab == 44] = 1
+        proj_label_ground[lab == 48] = 1
+        proj_label_ground[lab == 49] = 1
+        proj_label_ground[lab == 60] = 1
+        # proj_label_ground[lab == 40 or lab == 44 or lab == 48 or lab == 49 or lab == 60] = 1
+        self.masked_label = proj_label_ground
 
     def __len__(self):
         return len(self.pointcloud_path)
 
+
     def __getitem__(self, index):
         self.get_data(self.pointcloud_path[index], self.label_path[index])
-        self.limitDataset([-51.2, 51.2], [-51.2, 51.2], [-5, 3])
+        # self.limitDataset([-51.2, 51.2], [-51.2, 51.2], [-5, 3])
+        self.limitDataset_circular(39.9, [-3, 5])
         self.do_range_projection()
 
         rem = np.expand_dims(self.proj_remission, axis=0)
-        self.car_only_masking()
+        self.ground_only_masking()
+        # self.car_only_masking()
+
+        # label = np.expand_dims(self.masked_label, axis=0)
         # lab = np.expand_dims(self.proj_sem_label, axis=0)
         # proj_mask = torch.from_numpy(self.proj_mask)
         # self.proj_sem_label = torch.from_numpy(self.proj_sem_label).clone()
